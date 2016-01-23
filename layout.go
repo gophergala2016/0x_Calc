@@ -4,9 +4,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"unsafe"
 
-	_ "github.com/mattn/go-gtk/gdkpixbuf"
-	_ "github.com/mattn/go-gtk/glib"
+	gdk "github.com/mattn/go-gtk/gdk"
+	glib "github.com/mattn/go-gtk/glib"
 	gtk "github.com/mattn/go-gtk/gtk"
 )
 
@@ -31,13 +32,18 @@ const (
 func main() {
 	defer catch() // catch Panic
 
-	win_start()
+	Start()
 }
+
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+// Utilities
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 // Basic Panic Handelr
 func catch() {
 	s := recover()
 	if s != nil {
+		// print the content
 		fmt.Println(s)
 	}
 }
@@ -47,67 +53,56 @@ func button(_lbl string) *gtk.Button {
 	return gtk.NewButtonWithLabel(_lbl)
 }
 
-func win_start() {
-	defer catch() // Panic Handler
-	// Initiate GTK
-	gtk.Init(&os.Args)
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+// Initializers
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
-	// Window Setup
-	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+// Program Menu
+func init_Menu(_MenuBar *gtk.MenuBar) {
+	if _MenuBar == nil {
+		panic("init_Menu() : nil received")
+	}
+	// Vertical Box for menu
+	box_menu := gtk.NewVBox(false, 1)
+	// MenuBar - menu
+	mb_menu := gtk.NewMenuBar()
+	box_menu.PackStart(mb_menu, false, false, 0)
 
-	// Create the Main Window
-	// Set title & size
-	win := gtk.NewWindow(gtk.WINDOW_TOPLEVEL)
-	win.SetTitle("0x_Calc")
+	// Menu Items
 
-	// on Exit -> Quit the program
-	win.Connect("destroy", gtk.MainQuit)
+	// [File]
+	mi_file := gtk.NewMenuItemWithMnemonic("_File2")
+	mb_menu.Append(mi_file)
+	// Submenu for [File]
+	subm_file := gtk.NewMenu()
+	mi_file.SetSubmenu(subm_file)
 
-	box_win := gtk.NewVBox(Homogeneous, Default_Spacing)
+	mi_exit := gtk.NewMenuItemWithMnemonic("_Exit2")
+	mb_menu.Append(mi_exit)
 
-	// Menu Bar
-	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+	mi_exit.Connect("activate", func() {
+		gtk.MainQuit()
+	})
 
-	/*
-			// Vertical Box for menu
-			box_menu := gtk.NewVBox(false, 1)
-			// MenuBar - menu
-			mb_menu := gtk.NewMenuBar()
-			box_menu.PackStart(mb_menu, false, false, 0)
+	// Add the menubox
+	//win.Add(box_menu)
+}
 
-			// Menu Items
+// Calculation Frame
+func init_Calc(_Frame *gtk.Frame) {
+	if _Frame == nil {
+		panic("init_Calc() : nil received")
+	}
 
-			// [File]
-			mi_file := gtk.NewMenuItemWithMnemonic("_File2")
-			mb_menu.Append(mi_file)
-			// Submenu for [File]
-			subm_file := gtk.NewMenu()
-			mi_file.SetSubmenu(subm_file)
-
-			mi_exit := gtk.NewMenuItemWithMnemonic("_Exit2")
-			mb_menu.Append(mi_exit)
-
-			mi_exit.Connect("activate", func() {
-				gtk.MainQuit()
-			})
-
-		// Add the menubox
-		win.Add(box_menu)
-	*/
-
-	// Frame - Calculation
-	// This frame contains radix(16,10,8) and result labels
-	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-	fm_calc := gtk.NewFrame("Calculation")
 	// (inner) Box of Calculation
 	fm_calc_box := gtk.NewHBox(false, 1)
-	fm_calc.Add(fm_calc_box)
+	_Frame.Add(fm_calc_box)
 
 	// Box for Radix Buttons.
 	box_rdx := gtk.NewVBox(false, 1)
-	btn_hex := button("Hex")                 // [Hex] : Hexadecimal
-	btn_dec := gtk.NewButtonWithLabel("Dec") // [Dec] : Decimal
-	btn_oct := gtk.NewButtonWithLabel("Oct") // [Oct] : Octal
+	btn_hex := button("Hex") // [Hex] : Hexadecimal
+	btn_dec := button("Dec") // [Dec] : Decimal
+	btn_oct := button("Oct") // [Oct] : Octal
 	box_rdx.Add(btn_hex)
 	box_rdx.Add(btn_dec)
 	box_rdx.Add(btn_oct)
@@ -122,19 +117,18 @@ func win_start() {
 	// Add both Boxes (Radix & Result) to frame box
 	fm_calc_box.Add(box_rdx)
 	fm_calc_box.Add(box_labels)
+}
 
-	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+// Number Button Frame
+func init_Nums(_Frame *gtk.Frame) {
+	if _Frame == nil {
+		panic("init_Nums() : nil received")
+	}
 
-	// Frame - Numbers
-	// This frame contains number buttons for calculation
-	//  	Hexadecimal	: 0 ~ 9, A ~ F
-	//  	Decimal   	: 0 ~ 9
-	//  	Octal     	: 0 ~ 7
-	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-	fm_nums := gtk.NewFrame("Numbers")
 	// (inner) Box of Numbers
 	fm_nums_box := gtk.NewVBox(false, 1)
-	fm_nums.Add(fm_nums_box)
+	// Add to given frame
+	_Frame.Add(fm_nums_box)
 
 	// Table Initialization
 	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
@@ -175,19 +169,17 @@ func win_start() {
 
 	// Add the table to box
 	fm_nums_box.Add(tbl_nums)
-	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+}
 
-	// Frame - Operations
-	// This frame contains operations.
-	//  	ADD, SUB, MUL, DIV, MOD
-	//  	AND, OR, XOR, NOT
-	//  	LSHFT, RSHFT
-	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-	fm_oper := gtk.NewFrame("Operations")
+// Operator Frame
+func init_Oper(_Frame *gtk.Frame) {
+	if _Frame == nil {
+		panic("init_Oper() : nil received")
+	}
+
 	// (inner) Box of Operations
 	fm_oper_box := gtk.NewVBox(false, 1)
-	fm_oper.Add(fm_oper_box)
+	_Frame.Add(fm_oper_box)
 
 	tbl_opers := gtk.NewTable(5, 3, false)
 
@@ -227,10 +219,69 @@ func win_start() {
 
 	fm_oper_box.Add(tbl_opers)
 
-	// Place buttons into the table
-	// tbl_opers.Attach(oper[0], 0, 1, 3, 4, gtk.FILL, gtk.FILL, 5, 1) // 0
+}
 
-	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+// Ready for event streaming
+func Setup_Events(_Window *gtk.Window) chan interface{} {
+	defer catch()
+
+	if _Window == nil {
+		panic("init_Events() : nil window received")
+	}
+
+	// on Exit -> Quit the program
+	_Window.Connect("destroy", gtk.MainQuit)
+
+	ev_chan := make(chan interface{})
+
+	_Window.Connect("key-press-event", func(ctx *glib.CallbackContext) {
+		arg := ctx.Args(0)
+		ev_chan <- *(**gdk.EventKey)(unsafe.Pointer(&arg))
+	})
+
+	// Set the keyboard events
+	_Window.SetEvents(int(gdk.BUTTON_PRESS_MASK))
+
+	return ev_chan
+}
+
+func Setup_UI(_Window *gtk.Window) {
+	if _Window == nil {
+		panic("init_UI() : nil received ")
+	}
+
+	box_win := gtk.NewVBox(Homogeneous, Default_Spacing)
+
+	// Menu Bar
+	//  	File :
+	//  	View :
+	//  	Help :
+	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+	//mb_Menu := gtk.NewMenuBar()
+
+	// Frame - Calculation
+	// This frame contains radix(16,10,8) and result labels
+	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+	fm_calc := gtk.NewFrame("Calculation")
+	init_Calc(fm_calc)
+
+	// Frame - Numbers
+	// This frame contains number buttons for calculation
+	//  	Hexadecimal	: 0 ~ 9, A ~ F
+	//  	Decimal   	: 0 ~ 9
+	//  	Octal     	: 0 ~ 7
+	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+	fm_nums := gtk.NewFrame("Numbers")
+	init_Nums(fm_nums)
+
+	// Frame - Operations
+	// This frame contains operations.
+	//  	ADD, SUB, MUL, DIV, MOD
+	//  	AND, OR, XOR, NOT
+	//  	LSHFT, RSHFT
+	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+	fm_oper := gtk.NewFrame("Operations")
+	init_Oper(fm_oper)
 
 	// Frame Positionings
 	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
@@ -246,8 +297,47 @@ func win_start() {
 	box_win.Add(vpan1)
 
 	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-	fmt.Println("UI Over?")
-	win.Add(box_win)
+	_Window.Add(box_win)
+}
+
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+// GUI exports
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
+func Start() {
+	defer catch() // Panic Handler
+
+	// Initiate GTK
+	gtk.Init(&os.Args)
+
+	// Window Setup
+	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
+	// Create the Main Window
+	// Set title & size
+	win := gtk.NewWindow(gtk.WINDOW_TOPLEVEL)
+	win.SetTitle("0x_Calc")
+
+	// on Exit -> Quit the program
+	win.Connect("destroy", gtk.MainQuit)
+
+	// Initialte evnets
+	event := Setup_Events(win)
+
+	go func() {
+		for {
+			e := <-event
+			switch ev := e.(type) {
+			case *gdk.EventKey:
+				fmt.Println("key-press-event:", ev.Keyval)
+				break
+			}
+		}
+	}()
+
+	// Initialize UI
+	Setup_UI(win)
+
 	win.SetSizeRequest(UI_Width, UI_Height)
 	win.ShowAll()
 
