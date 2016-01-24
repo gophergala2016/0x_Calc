@@ -43,15 +43,31 @@ func main() {
 // Type : UI
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
+const (
+	CVT_HEX = 16
+	CVT_DEC = 10
+	CVT_OCT = 8
+)
+
 type UI struct {
-	Win        *gtk.Window            // Main Window
-	Calc_Frame *gtk.Frame             // Frame for Calculation
-	Nums_Frame *gtk.Frame             // Frame for Number buttons
-	Oper_Frame *gtk.Frame             // Frame for Operator buttons
-	Lbl_prev   *gtk.Label             // Label for previous result
-	Lbl_late   *gtk.Label             // Label for latest result
-	Btn_map    map[string]*gtk.Button // Map of Buttons
-	Ch_Event   chan interface{}       // Channel for event streaming
+	// GUI components
+	Win        *gtk.Window // Main Window
+	Calc_Frame *gtk.Frame  // Frame for Calculation
+	Nums_Frame *gtk.Frame  // Frame for Number buttons
+	Oper_Frame *gtk.Frame  // Frame for Operator buttons
+	Lbl_prev   *gtk.Label  // Label for previous result
+	Lbl_lhs    *gtk.Label  // Label for Left hand side value
+	Lbl_rhs    *gtk.Label  // Label for Right hand side value
+
+	Btn_map map[string]*gtk.Button // Map of Buttons
+
+	// Member for Operation
+	mode     int
+	csr      bool
+	prev     int              // previous result
+	lhs      int              // operand type is int
+	rhs      int              // operand type is int
+	Ch_Event chan interface{} // Channel for event streaming
 }
 
 // Constructor function
@@ -76,11 +92,15 @@ func (this *UI) Construct() {
 	this.Nums_Frame = gtk.NewFrame("Numbers")
 	this.Oper_Frame = gtk.NewFrame("Operation")
 
-	this.Lbl_prev = gtk.NewLabel("(Previous Result)")
-	this.Lbl_late = gtk.NewLabel("(Latest Result)")
+	this.Lbl_prev = gtk.NewLabel("(Previous)")
+	this.Lbl_lhs = gtk.NewLabel("(LHS)")
+	this.Lbl_rhs = gtk.NewLabel("(RHS)")
 
 	this.Btn_map = make(map[string]*gtk.Button)
 	this.Ch_Event = make(chan interface{})
+
+	this.csr = false
+	this.mode = CVT_DEC
 
 	// 2. Setup Layout
 	// ---- ---- ---- ---- ---- ---- ---- ----
@@ -153,9 +173,17 @@ func (this *UI) init_Calc() {
 		panic("UI::init_Calc() : VBox allocation Failed")
 	}
 
-	// Place label members
+	// Place previous result
 	box_labels.Add(this.Lbl_prev)
-	box_labels.Add(this.Lbl_late)
+
+	// Place left and right operand
+	box_LnR := gtk.NewHBox(false, 3)
+	if box_LnR == nil {
+		panic("UI::init_Calc() : HBox allocation Failed")
+	}
+	box_LnR.Add(this.Lbl_lhs)
+	box_LnR.Add(this.Lbl_rhs)
+	box_labels.Add(box_LnR)
 
 	// Add both Boxes (Radix & Result) to frame box
 	fm_calc_box.Add(box_rdx)
@@ -297,7 +325,13 @@ func (this *UI) init_Oper() {
 		}
 	}
 
+	btn_done := button("=")
+	tbl_opers.Attach(btn_done, uint(4), uint(4)+1, uint(2), uint(2)+1,
+		gtk.FILL, gtk.FILL, 1, 1)
+
 	// Insert all buttons to button map
+	this.Btn_map["="] = btn_done
+
 	this.Btn_map["ADD"] = oper_arit[0]
 	this.Btn_map["SUB"] = oper_arit[1]
 	this.Btn_map["MUL"] = oper_arit[2]
@@ -406,60 +440,110 @@ func (this *UI) init_Events() {
 //  	Supports only 3.
 //  	16(hex), 10(dec), 8(oct)
 func (this *UI) switch_format(_rdx int) {
+	//prev := this.mode
 	switch _rdx {
 	case 8:
-		fmt.Println("Radix : ", 8)
-		break
+		this.mode = CVT_OCT
+		fmt.Println("Radix : ", this.mode)
 	case 10:
-		fmt.Println("Radix : ", 10)
-		break
+		this.mode = CVT_DEC
+		fmt.Println("Radix : ", this.mode)
 	case 16:
-		fmt.Println("Radix : ", 16)
-		break
+		this.mode = CVT_HEX
+		fmt.Println("Radix : ", this.mode)
 	default:
 		break
 	}
+
+	// convert all strings based on the mode
+	// this.mode
+	// this.set_prev()	this.pre .toOct()
+	// this.set_left()	this.lhs .toHex()
+	// this.set_right()	this.rhs .toDec()
 }
 
 // Handler for Number Buttons
 //  	0(0x0) ~ 15(0xF)
 func (this *UI) handle_num(_val int) {
+
+	if this.csr == false {
+		// Writing Left hand side
+		res := this.lhs * this.mode
+		res += _val
+		this.lhs = res
+		this.set_left(strconv.Itoa(this.lhs))
+	} else {
+		// Writing Right hand side
+		res := this.rhs * this.mode
+		res += _val
+		this.rhs = res
+		this.set_right(strconv.Itoa(this.rhs))
+	}
 	fmt.Println("Handle : Num : ", _val)
 }
 
 // Handler for Arithmetic operation
 //  	ADD, SUB, MUL, DIV, MOD
 func (this *UI) handle_arith(_code int) {
-	switch _code {
-	case OP_ADD:
-		fmt.Println("Handle : ADD")
-	case OP_SUB:
-		fmt.Println("Handle : SUB")
-	case OP_MUL:
-		fmt.Println("Handle : MUL")
-	case OP_DIV:
-		fmt.Println("Handle : DIV")
-	case OP_MOD:
-		fmt.Println("Handle : MOD")
-	default:
-		return
+	if this.csr == false {
+		// move focus from left to right
+		this.csr = true
+	} else {
+		// handle the code :
+		//  	Calculate the inner value
+		switch _code {
+		case OP_ADD:
+			this.prev = this.lhs + this.rhs
+			fmt.Println("Handle : ADD")
+		case OP_SUB:
+			this.prev = this.lhs - this.rhs
+			fmt.Println("Handle : SUB")
+		case OP_MUL:
+			this.prev = this.lhs * this.rhs
+			fmt.Println("Handle : MUL")
+		case OP_DIV:
+			this.prev = this.lhs / this.rhs
+			fmt.Println("Handle : DIV")
+		case OP_MOD:
+			this.prev = this.lhs % this.rhs
+			fmt.Println("Handle : MOD")
+		default:
+			return
+		}
+
+		// Display the result
+		this.Lbl_prev.SetLabel(strconv.Itoa(this.prev))
+		// clear the operands
+		this.Lbl_lhs.SetLabel("")
+		this.lhs = 0
+		this.Lbl_rhs.SetLabel("")
+		this.rhs = 0
+		// Reset the cursor
+		this.csr = false
 	}
 }
 
 // Handler for Bitwise operation
 //  	AND, OR, XOR, NOT
 func (this *UI) handle_bit(_code int) {
-	switch _code {
-	case OP_AND:
-		fmt.Println("Handle : AND")
-	case OP_OR:
-		fmt.Println("Handle : OR")
-	case OP_XOR:
-		fmt.Println("Handle : XOR")
-	case OP_NOT:
-		fmt.Println("Handle : NOT")
-	default:
-		return
+	// move focus from left to right
+	if this.csr != true {
+		this.csr = true
+	}
+	else{
+		// handle the code
+		switch _code {
+		case OP_AND:
+			fmt.Println("Handle : AND")
+		case OP_OR:
+			fmt.Println("Handle : OR")
+		case OP_XOR:
+			fmt.Println("Handle : XOR")
+		case OP_NOT:
+			fmt.Println("Handle : NOT")
+		default:
+			return
+	}
 	}
 }
 
@@ -477,17 +561,18 @@ func (this *UI) handle_shft(_code int) {
 }
 
 // Change the Label of previous result
-func (this *UI) set_prev(_result string) {
-	if _result != nil {
-		this.Lbl_prev.SetLabel(_result)
-	}
+func (this *UI) set_prev(_str string) {
+	this.Lbl_prev.SetLabel(_str)
 }
 
-// Change the Label of latest result
-func (this *UI) set_late(_result string) {
-	if _result != nil {
-		this.Lbl_late.SetLabel(_result)
-	}
+// Change the Label of left operand
+func (this *UI) set_left(_str string) {
+	this.Lbl_lhs.SetLabel(_str)
+}
+
+// Change the Label of right operand
+func (this *UI) set_right(_str string) {
+	this.Lbl_rhs.SetLabel(_str)
 }
 
 // ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
@@ -495,8 +580,7 @@ func (this *UI) set_late(_result string) {
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 // Operand Redefinition
-type Operand int64
-type Opnd Operand
+// type Operand int
 
 // Operation Codes
 const (
@@ -549,9 +633,6 @@ func Start() {
 	defer main_ui.Destruct()
 
 	fmt.Println("UI Objects construction finished.")
-
-	// Event Code Here?
-
 	fmt.Println("Starting the UI...")
 
 	// Start the UI
