@@ -15,6 +15,8 @@ import (
 // ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
 // Constants
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
+// UI constants
 const (
 	// For window size
 	UI_Width  = 640
@@ -24,15 +26,42 @@ const (
 	No_Resize = false // No resize in Pack#()
 	No_Shrink = false // No shrink in Pack#()
 
-	Homogeneous   = false
-	Heterogeneous = true
-
+	Homogeneous     = false
+	Heterogeneous   = true
 	Default_Spacing = 1
+)
+
+// Radix Converting
+const (
+	CVT_HEX = 16
+	CVT_DEC = 10
+	CVT_OCT = 8
+)
+
+// Presence of Operator : Operator Cursor
+const (
+	EXIST = true
+	NONE  = false
+)
+
+// Operation Codes
+const (
+	OP_XXX = iota
+	OP_ADD
+	OP_SUB
+	OP_MUL
+	OP_DIV
+	OP_MOD
+	OP_AND
+	OP_OR
+	OP_XOR
+	OP_NOT
+	OP_LSHFT
+	OP_RSHFT
 )
 
 // Main function.
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
 func main() {
 	defer catch() // catch Panic
 
@@ -42,12 +71,6 @@ func main() {
 // ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
 // Type : UI
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-const (
-	CVT_HEX = 16
-	CVT_DEC = 10
-	CVT_OCT = 8
-)
 
 type UI struct {
 	// GUI components
@@ -62,8 +85,9 @@ type UI struct {
 	Btn_map map[string]*gtk.Button // Map of Buttons
 
 	// Member for Operation
-	mode     int
-	csr      bool
+	op_code  int              // Operation Code
+	radix    int              // Current radix
+	csr      bool             // NONE / EXIST
 	prev     int              // previous result
 	lhs      int              // operand type is int
 	rhs      int              // operand type is int
@@ -99,8 +123,9 @@ func (this *UI) Construct() {
 	this.Btn_map = make(map[string]*gtk.Button)
 	this.Ch_Event = make(chan interface{})
 
-	this.csr = false
-	this.mode = CVT_DEC
+	this.csr = NONE       // There is no operator
+	this.radix = CVT_DEC  // Decimal radix format
+	this.op_code = OP_XXX // Nothing
 
 	// 2. Setup Layout
 	// ---- ---- ---- ---- ---- ---- ---- ----
@@ -325,6 +350,7 @@ func (this *UI) init_Oper() {
 		}
 	}
 
+	// "Do calculate" button!
 	btn_done := button("=")
 	tbl_opers.Attach(btn_done, uint(4), uint(4)+1, uint(2), uint(2)+1,
 		gtk.FILL, gtk.FILL, 1, 1)
@@ -351,7 +377,7 @@ func (this *UI) init_Oper() {
 // Locate frames on the window
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 func (this *UI) put_frames() {
-	box_win := gtk.NewVBox(Heterogeneous, Default_Spacing)
+	box_win := gtk.NewVBox(Homogeneous, Default_Spacing)
 	if box_win == nil {
 		panic("UI::put_frames() : VBox allocation Failed")
 	}
@@ -397,9 +423,9 @@ func (this *UI) init_Events() {
 
 	// Format Buttons
 	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-	btn["Hex"].Connect("clicked", func() { this.switch_format(16) })
-	btn["Dec"].Connect("clicked", func() { this.switch_format(10) })
-	btn["Oct"].Connect("clicked", func() { this.switch_format(8) })
+	btn["Hex"].Connect("clicked", func() { this.switch_radix(16) })
+	btn["Dec"].Connect("clicked", func() { this.switch_radix(10) })
+	btn["Oct"].Connect("clicked", func() { this.switch_radix(8) })
 
 	// Number Buttons
 	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
@@ -434,47 +460,75 @@ func (this *UI) init_Events() {
 	btn["LSHFT"].Connect("clicked", func() { this.handle_shft(OP_LSHFT) })
 	btn["RSHFT"].Connect("clicked", func() { this.handle_shft(OP_RSHFT) })
 
+	// Do calculate Button
+	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+	this.Btn_map["="].Connect("clicked", func() { this.calculate() })
 }
+
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+// UI : Control Functions
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 // Switch the radix format.
 //  	Supports only 3.
 //  	16(hex), 10(dec), 8(oct)
-func (this *UI) switch_format(_rdx int) {
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+func (this *UI) switch_radix(_rdx int) {
 	//prev := this.mode
 	switch _rdx {
+	// Change to Octal format
 	case 8:
-		this.mode = CVT_OCT
-		fmt.Println("Radix : ", this.mode)
+		this.radix = CVT_OCT
+
+		oct_pr, _ := Dec_to_OctStr(this.prev, 0)
+		oct_l, oct_r := Dec_to_OctStr(this.lhs, this.rhs)
+
+		this.set_prev(oct_pr)
+		this.set_left(oct_l)
+		this.set_right(oct_r)
+
+		fmt.Println("Radix : ", this.radix)
+	// Change to Decimal format
 	case 10:
-		this.mode = CVT_DEC
-		fmt.Println("Radix : ", this.mode)
+		this.radix = CVT_DEC
+		// Chance all value to decimal notation
+		this.set_prev(strconv.Itoa(this.prev))
+		this.set_left(strconv.Itoa(this.lhs))
+		this.set_right(strconv.Itoa(this.rhs))
+
+		fmt.Println("Radix : ", this.radix)
+	// Change to Hexadecimal format
 	case 16:
-		this.mode = CVT_HEX
-		fmt.Println("Radix : ", this.mode)
+		this.radix = CVT_HEX
+
+		hex_pr, _ := Dec_to_HexStr(this.prev, 0)
+		hex_l, hex_r := Dec_to_HexStr(this.lhs, this.rhs)
+
+		// Chance all value to decimal notation
+		this.set_prev(hex_pr)
+		this.set_left(hex_l)
+		this.set_right(hex_r)
+
+		fmt.Println("Radix : ", this.radix)
 	default:
 		break
 	}
-
-	// convert all strings based on the mode
-	// this.mode
-	// this.set_prev()	this.pre .toOct()
-	// this.set_left()	this.lhs .toHex()
-	// this.set_right()	this.rhs .toDec()
 }
 
 // Handler for Number Buttons
 //  	0(0x0) ~ 15(0xF)
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 func (this *UI) handle_num(_val int) {
 
 	if this.csr == false {
 		// Writing Left hand side
-		res := this.lhs * this.mode
+		res := this.lhs * this.radix
 		res += _val
 		this.lhs = res
 		this.set_left(strconv.Itoa(this.lhs))
 	} else {
 		// Writing Right hand side
-		res := this.rhs * this.mode
+		res := this.rhs * this.radix
 		res += _val
 		this.rhs = res
 		this.set_right(strconv.Itoa(this.rhs))
@@ -484,71 +538,93 @@ func (this *UI) handle_num(_val int) {
 
 // Handler for Arithmetic operation
 //  	ADD, SUB, MUL, DIV, MOD
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 func (this *UI) handle_arith(_code int) {
-	if this.csr == false {
+	if this.csr == NONE {
 		// move focus from left to right
-		this.csr = true
+		this.csr = EXIST
+		// store the operation code
+		this.op_code = _code
 	} else {
-		// handle the code :
-		//  	Calculate the inner value
-		switch _code {
+		// Calculate and save at left hand side
+		switch this.op_code {
 		case OP_ADD:
-			this.prev = this.lhs + this.rhs
+			this.lhs = this.lhs + this.rhs
 			fmt.Println("Handle : ADD")
 		case OP_SUB:
-			this.prev = this.lhs - this.rhs
+			this.lhs = this.lhs - this.rhs
 			fmt.Println("Handle : SUB")
 		case OP_MUL:
-			this.prev = this.lhs * this.rhs
+			this.lhs = this.lhs * this.rhs
 			fmt.Println("Handle : MUL")
 		case OP_DIV:
-			this.prev = this.lhs / this.rhs
+			this.lhs = this.lhs / this.rhs
 			fmt.Println("Handle : DIV")
 		case OP_MOD:
-			this.prev = this.lhs % this.rhs
+			this.lhs = this.lhs % this.rhs
 			fmt.Println("Handle : MOD")
 		default:
 			return
 		}
+		// store the new operation code
+		this.op_code = _code
+		this.csr = EXIST
 
-		// Display the result
-		this.Lbl_prev.SetLabel(strconv.Itoa(this.prev))
-		// clear the operands
-		this.Lbl_lhs.SetLabel("")
-		this.lhs = 0
-		this.Lbl_rhs.SetLabel("")
+		// reset right hand side
 		this.rhs = 0
-		// Reset the cursor
-		this.csr = false
+
+		// Refresh the labels
+		this.Lbl_prev.SetLabel(strconv.Itoa(this.prev))
+		this.Lbl_lhs.SetLabel(strconv.Itoa(this.lhs))
+		this.Lbl_rhs.SetLabel(strconv.Itoa(this.lhs))
 	}
 }
 
 // Handler for Bitwise operation
 //  	AND, OR, XOR, NOT
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 func (this *UI) handle_bit(_code int) {
-	// move focus from left to right
-	if this.csr != true {
-		this.csr = true
-	}
-	else{
-		// handle the code
-		switch _code {
+	if this.csr == NONE {
+		// move focus from left to right
+		this.csr = EXIST
+		// store the operation code
+		this.op_code = _code
+	} else {
+		// Calculate and save at left hand side
+		switch this.op_code {
 		case OP_AND:
+			this.lhs = this.lhs & this.rhs
 			fmt.Println("Handle : AND")
 		case OP_OR:
-			fmt.Println("Handle : OR")
+			this.lhs = this.lhs | this.rhs
+			fmt.Println("Handle : SUB")
 		case OP_XOR:
-			fmt.Println("Handle : XOR")
+			this.lhs = this.lhs ^ this.rhs
+			fmt.Println("Handle : MUL")
 		case OP_NOT:
-			fmt.Println("Handle : NOT")
+			this.lhs = ^this.lhs
+			this.rhs = ^this.rhs
+			fmt.Println("Handle : DIV")
 		default:
 			return
-	}
+		}
+		// store the new operation code
+		this.op_code = _code
+		this.csr = EXIST
+
+		// reset right hand side
+		this.rhs = 0
+
+		// Refresh the labels
+		this.Lbl_prev.SetLabel(strconv.Itoa(this.prev))
+		this.Lbl_lhs.SetLabel(strconv.Itoa(this.lhs))
+		this.Lbl_rhs.SetLabel(strconv.Itoa(this.lhs))
 	}
 }
 
 // Handler for Shift operation
 //  	Left Shift, Right Shift
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 func (this *UI) handle_shft(_code int) {
 	switch _code {
 	case OP_LSHFT:
@@ -559,6 +635,48 @@ func (this *UI) handle_shft(_code int) {
 		return
 	}
 }
+
+// Calculate the result based on current information
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+func (this *UI) calculate() {
+	// handle the code :
+	//  	Calculate the inner value
+	switch this.op_code {
+	case OP_ADD:
+		this.prev = this.lhs + this.rhs
+	case OP_SUB:
+		this.prev = this.lhs - this.rhs
+	case OP_MUL:
+		this.prev = this.lhs * this.rhs
+	case OP_DIV:
+		this.prev = this.lhs / this.rhs
+	case OP_MOD:
+		this.prev = this.lhs % this.rhs
+	case OP_AND:
+		this.prev = this.lhs & this.rhs
+	case OP_OR:
+		this.prev = this.lhs | this.rhs
+	case OP_XOR:
+		this.prev = this.lhs ^ this.rhs
+	case OP_NOT:
+		this.prev = ^this.prev
+		this.lhs = ^this.lhs
+		this.rhs = ^this.rhs
+	default:
+		return
+	}
+
+	// Refresh the labels
+	this.set_prev(strconv.Itoa(this.prev))
+	this.set_left(strconv.Itoa(this.lhs))
+	this.set_right(strconv.Itoa(this.rhs))
+	// Reset the Operation Code and Operator Cursor
+	this.op_code = OP_XXX
+	this.csr = NONE
+}
+
+// Label Update Functions
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 // Change the Label of previous result
 func (this *UI) set_prev(_str string) {
@@ -574,28 +692,6 @@ func (this *UI) set_left(_str string) {
 func (this *UI) set_right(_str string) {
 	this.Lbl_rhs.SetLabel(_str)
 }
-
-// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-// Type : Operand and Operator
-// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-// Operand Redefinition
-// type Operand int
-
-// Operation Codes
-const (
-	OP_ADD = iota
-	OP_SUB
-	OP_MUL
-	OP_DIV
-	OP_MOD
-	OP_AND
-	OP_OR
-	OP_XOR
-	OP_NOT
-	OP_LSHFT
-	OP_RSHFT
-)
 
 // ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
 // Utilities
@@ -622,7 +718,7 @@ func button(_lbl string) *gtk.Button {
 func Start() {
 	defer catch() // Panic Handler
 
-	// Initiate GTK
+	// Initialize GTK
 	gtk.Init(&os.Args)
 
 	// Window Setup
@@ -632,10 +728,10 @@ func Start() {
 	main_ui.Construct()
 	defer main_ui.Destruct()
 
-	fmt.Println("UI Objects construction finished.")
+	// Notification
 	fmt.Println("Starting the UI...")
 
-	// Start the UI
+	// Start the Program
 	gtk.Main()
 }
 
