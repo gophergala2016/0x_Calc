@@ -4,13 +4,15 @@ package main
 import (
 	"fmt"
 	"os"
-	"unsafe"
+	"strconv"
+	_ "unsafe"
 
 	gdk "github.com/mattn/go-gtk/gdk"
-	glib "github.com/mattn/go-gtk/glib"
+	_ "github.com/mattn/go-gtk/glib"
 	gtk "github.com/mattn/go-gtk/gtk"
 )
 
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
 // Constants
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 const (
@@ -29,6 +31,8 @@ const (
 )
 
 // Main function.
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
 func main() {
 	defer catch() // catch Panic
 
@@ -36,70 +40,101 @@ func main() {
 }
 
 // ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-// Utilities
+// Type : UI
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
-// Basic Panic Handelr
-func catch() {
-	s := recover()
-	if s != nil {
-		// print the content
-		fmt.Println(s)
-	}
+type UI struct {
+	Win        *gtk.Window            // Main Window
+	Calc_Frame *gtk.Frame             // Frame for Calculation
+	Nums_Frame *gtk.Frame             // Frame for Number buttons
+	Oper_Frame *gtk.Frame             // Frame for Operator buttons
+	Lbl_prev   *gtk.Label             // Label for previous result
+	Lbl_late   *gtk.Label             // Label for latest result
+	Btn_map    map[string]*gtk.Button // Map of Buttons
+	Ch_Event   chan interface{}       // Channel for event streaming
 }
 
-// wrapper of button with new label
-func button(_lbl string) *gtk.Button {
-	return gtk.NewButtonWithLabel(_lbl)
+// Constructor function
+//  	1. Create Components
+//  	2. Setup Layout
+//  	3. Event - Callback
+func (this *UI) Construct() {
+	defer catch()
+	// 1. Creating Components
+	// ---- ---- ---- ---- ---- ---- ---- ----
+
+	// Create the Main Window
+	// Set title & size
+	this.Win = gtk.NewWindow(gtk.WINDOW_TOPLEVEL)
+	if this.Win == nil {
+		panic("UI::Construct() : Window allocation Failed")
+	}
+	window := this.Win               // Window aliasin
+	window.SetTitle("0x_Calculator") // SetTitle
+
+	this.Calc_Frame = gtk.NewFrame("Calculation")
+	this.Nums_Frame = gtk.NewFrame("Numbers")
+	this.Oper_Frame = gtk.NewFrame("Operation")
+
+	this.Lbl_prev = gtk.NewLabel("(Previous Result)")
+	this.Lbl_late = gtk.NewLabel("(Latest Result)")
+
+	this.Btn_map = make(map[string]*gtk.Button)
+	this.Ch_Event = make(chan interface{})
+
+	// 2. Setup Layout
+	// ---- ---- ---- ---- ---- ---- ---- ----
+	this.init_Calc()
+	this.init_Nums()
+	this.init_Oper()
+	this.put_frames()
+
+	// 3. Event - Callback connection
+	// ---- ---- ---- ---- ---- ---- ---- ----
+	this.init_Events()
+
+	// 4. Left overs
+	// ---- ---- ---- ---- ---- ---- ---- ----
+	window.SetSizeRequest(UI_Width, UI_Height)
+	window.ShowAll()
+}
+
+// Destructor function
+func (this *UI) Destruct() {
+	// Panic handler for Safe clean up
+	defer catch()
+
+	fmt.Println("UI::Destruct() : this UI is destructing...")
 }
 
 // ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-// Initializers
+// UI : Initializers
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
-// Program Menu
-func init_Menu(_MenuBar *gtk.MenuBar) {
-	if _MenuBar == nil {
-		panic("init_Menu() : nil received")
-	}
-	// Vertical Box for menu
-	box_menu := gtk.NewVBox(false, 1)
-	// MenuBar - menu
-	mb_menu := gtk.NewMenuBar()
-	box_menu.PackStart(mb_menu, false, false, 0)
-
-	// Menu Items
-
-	// [File]
-	mi_file := gtk.NewMenuItemWithMnemonic("_File2")
-	mb_menu.Append(mi_file)
-	// Submenu for [File]
-	subm_file := gtk.NewMenu()
-	mi_file.SetSubmenu(subm_file)
-
-	mi_exit := gtk.NewMenuItemWithMnemonic("_Exit2")
-	mb_menu.Append(mi_exit)
-
-	mi_exit.Connect("activate", func() {
-		gtk.MainQuit()
-	})
-
-	// Add the menubox
-	//win.Add(box_menu)
-}
-
-// Calculation Frame
-func init_Calc(_Frame *gtk.Frame) {
+// Frame - Calculation
+// This frame contains radix(16,10,8) and result labels
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+func (this *UI) init_Calc() {
+	// In this function, the designated frame is Calc_Frame
+	_Frame := this.Calc_Frame
 	if _Frame == nil {
-		panic("init_Calc() : nil received")
+		panic("UI::init_Calc() : nil Frame received")
 	}
 
 	// (inner) Box of Calculation
 	fm_calc_box := gtk.NewHBox(false, 1)
+	if fm_calc_box == nil {
+		panic("UI::init_Calc() : HBox allocation Failed")
+	}
+
 	_Frame.Add(fm_calc_box)
 
 	// Box for Radix Buttons.
 	box_rdx := gtk.NewVBox(false, 1)
+	if box_rdx == nil {
+		panic("UI::init_Calc() : VBox allocation Failed")
+	}
+
 	btn_hex := button("Hex") // [Hex] : Hexadecimal
 	btn_dec := button("Dec") // [Dec] : Decimal
 	btn_oct := button("Oct") // [Oct] : Octal
@@ -107,46 +142,76 @@ func init_Calc(_Frame *gtk.Frame) {
 	box_rdx.Add(btn_dec)
 	box_rdx.Add(btn_oct)
 
+	// Insert radix buttons into the map
+	this.Btn_map["Hex"] = btn_hex
+	this.Btn_map["Dec"] = btn_dec
+	this.Btn_map["Oct"] = btn_oct
+
 	// Box for Result Labels
 	box_labels := gtk.NewVBox(false, 1)
-	lbl_prev := gtk.NewLabel("Previous Result") // Previous Calculation
-	lbl_late := gtk.NewLabel("Current Result")  // Latest Calculaltion
-	box_labels.Add(lbl_prev)
-	box_labels.Add(lbl_late)
+	if box_labels == nil {
+		panic("UI::init_Calc() : VBox allocation Failed")
+	}
+
+	// Place label members
+	box_labels.Add(this.Lbl_prev)
+	box_labels.Add(this.Lbl_late)
 
 	// Add both Boxes (Radix & Result) to frame box
 	fm_calc_box.Add(box_rdx)
 	fm_calc_box.Add(box_labels)
+
+	fmt.Println("UI::init_Calc() done.")
 }
 
-// Number Button Frame
-func init_Nums(_Frame *gtk.Frame) {
+// Frame - Numbers
+// This frame contains number buttons for calculation
+//  	Hexadecimal	: 0 ~ 9, A ~ F
+//  	Decimal   	: 0 ~ 9
+//  	Octal     	: 0 ~ 7
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+func (this *UI) init_Nums() {
+	// In this function, the designated frame is Nums_Frame
+	_Frame := this.Nums_Frame
+
 	if _Frame == nil {
-		panic("init_Nums() : nil received")
+		panic("UI::init_Nums() : nil Frame received")
 	}
 
 	// (inner) Box of Numbers
 	fm_nums_box := gtk.NewVBox(false, 1)
+	if fm_nums_box == nil {
+		panic("UI::init_Nums() : VBox allocation Failed")
+	}
 	// Add to given frame
 	_Frame.Add(fm_nums_box)
 
 	// Table Initialization
 	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 	tbl_nums := gtk.NewTable(5, 4, false)
-
-	// Jagged slice of buttons
+	if tbl_nums == nil {
+		panic("UI::init_Nums() : Table allocation Failed")
+	}
+	// Jagged slice of buttons?
 	// nums := [][]*gtk.Button{}
 
 	// Button for Number
-	num := [17]*gtk.Button{
+	num := [...]*gtk.Button{
 		// 0~7 : Oct
 		button("0"), button("1"), button("2"), button("3"),
 		button("4"), button("5"), button("6"), button("7"),
 		// 0~9 : Dec
 		button("8"), button("9"),
-		// 0~F : Hex
+		// A~F : Hex
 		button("A"), button("B"), button("C"),
 		button("D"), button("E"), button("F"),
+	}
+
+	// Insert all Buttons to map
+	for idx, btn := range num {
+		//fmt.Println("UI::init_Nums() : Index :\t", idx, "Button :\t", btn.GetLabel())
+		s_idx := strconv.Itoa(idx)
+		this.Btn_map[s_idx] = btn
 	}
 
 	// Place buttons into the table
@@ -169,23 +234,38 @@ func init_Nums(_Frame *gtk.Frame) {
 
 	// Add the table to box
 	fm_nums_box.Add(tbl_nums)
+	fmt.Println("UI::init_Nums() done.")
 }
 
-// Operator Frame
-func init_Oper(_Frame *gtk.Frame) {
+// Frame - Operations
+// This frame contains operations.
+//  	ADD, SUB, MUL, DIV, MOD
+//  	AND, OR, XOR, NOT
+//  	LSHFT, RSHFT
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+func (this *UI) init_Oper() {
+	// In this function, the designated frame is Oper_Frame
+	_Frame := this.Oper_Frame
 	if _Frame == nil {
-		panic("init_Oper() : nil received")
+		panic("UI::init_Oper() : nil Frame received")
 	}
 
 	// (inner) Box of Operations
 	fm_oper_box := gtk.NewVBox(false, 1)
+	if fm_oper_box == nil {
+		panic("UI::init_Nums() : VBox allocation Failed")
+	}
+
 	_Frame.Add(fm_oper_box)
 
 	tbl_opers := gtk.NewTable(5, 3, false)
+	if tbl_opers == nil {
+		panic("UI::init_Nums() : Table allocation Failed")
+	}
 
 	// Operation Buttons
 	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-	// Button for Number
+
 	// 'oper' is Jagged slice of buttons
 	oper := [][]*gtk.Button{}
 	// slice of Arithmetic
@@ -217,11 +297,269 @@ func init_Oper(_Frame *gtk.Frame) {
 		}
 	}
 
+	// Insert all buttons to button map
+	this.Btn_map["ADD"] = oper_arit[0]
+	this.Btn_map["SUB"] = oper_arit[1]
+	this.Btn_map["MUL"] = oper_arit[2]
+	this.Btn_map["DIV"] = oper_arit[3]
+	this.Btn_map["MOD"] = oper_arit[4]
+	this.Btn_map["AND"] = oper_bit[0]
+	this.Btn_map["OR"] = oper_bit[1]
+	this.Btn_map["XOR"] = oper_bit[2]
+	this.Btn_map["NOT"] = oper_bit[3]
+	this.Btn_map["LSHFT"] = oper_shft[0]
+	this.Btn_map["RSHFT"] = oper_shft[1]
 	fm_oper_box.Add(tbl_opers)
+
+	fmt.Println("UI::init_Oper() done.")
+}
+
+// Locate frames on the window
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+func (this *UI) put_frames() {
+	box_win := gtk.NewVBox(Heterogeneous, Default_Spacing)
+	if box_win == nil {
+		panic("UI::put_frames() : VBox allocation Failed")
+	}
+
+	vpan1 := gtk.NewVPaned()
+	if vpan1 == nil {
+		panic("UI::put_frames() : VPaned allocation failed")
+	}
+
+	vpan1.Pack1(this.Calc_Frame, No_Resize, No_Shrink) // Calc : Top half
+	hpan1 := gtk.NewHPaned()
+	if hpan1 == nil {
+		panic("UI::put_frames() : HPaned allocation failed")
+	}
+
+	hpan1.Pack1(this.Nums_Frame, No_Resize, No_Shrink) // Nums : Bottom-Left
+	hpan1.Pack2(this.Oper_Frame, No_Resize, No_Shrink) // Oper : Bottom-Right
+
+	vpan1.Pack2(hpan1, No_Resize, No_Shrink)
+	box_win.Add(vpan1)
+
+	if this.Win == nil {
+		panic("UI::put_frames() : nil Window received")
+	}
+	// Place all Layout
+	this.Win.Add(box_win)
+	fmt.Println("UI::put_frames() done.")
+}
+
+// UI Event - Callback binding
+//  	Window : "destroy"
+//  	Button : "clicked"
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+func (this *UI) init_Events() {
+	// on Exit -> Quit the program
+	this.Win.Connect("destroy", gtk.MainQuit)
+
+	// Set Listening : Keyboard
+	this.Win.SetEvents(int(gdk.BUTTON_PRESS_MASK))
+
+	// Map name aliasing
+	btn := this.Btn_map
+
+	// Format Buttons
+	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+	btn["Hex"].Connect("clicked", func() { this.switch_format(16) })
+	btn["Dec"].Connect("clicked", func() { this.switch_format(10) })
+	btn["Oct"].Connect("clicked", func() { this.switch_format(8) })
+
+	// Number Buttons
+	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+	btn["0"].Connect("clicked", func() { this.handle_num(0) })
+	btn["1"].Connect("clicked", func() { this.handle_num(1) })
+	btn["2"].Connect("clicked", func() { this.handle_num(2) })
+	btn["3"].Connect("clicked", func() { this.handle_num(3) })
+	btn["4"].Connect("clicked", func() { this.handle_num(4) })
+	btn["5"].Connect("clicked", func() { this.handle_num(5) })
+	btn["6"].Connect("clicked", func() { this.handle_num(6) })
+	btn["7"].Connect("clicked", func() { this.handle_num(7) })
+	btn["8"].Connect("clicked", func() { this.handle_num(8) })
+	btn["9"].Connect("clicked", func() { this.handle_num(9) })
+	btn["10"].Connect("clicked", func() { this.handle_num(10) })
+	btn["11"].Connect("clicked", func() { this.handle_num(11) })
+	btn["12"].Connect("clicked", func() { this.handle_num(12) })
+	btn["13"].Connect("clicked", func() { this.handle_num(13) })
+	btn["14"].Connect("clicked", func() { this.handle_num(14) })
+	btn["15"].Connect("clicked", func() { this.handle_num(15) })
+
+	// Operator Buttons
+	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+	btn["ADD"].Connect("clicked", func() { this.handle_arith(OP_ADD) })
+	btn["SUB"].Connect("clicked", func() { this.handle_arith(OP_SUB) })
+	btn["MUL"].Connect("clicked", func() { this.handle_arith(OP_MUL) })
+	btn["DIV"].Connect("clicked", func() { this.handle_arith(OP_DIV) })
+	btn["MOD"].Connect("clicked", func() { this.handle_arith(OP_MOD) })
+	btn["AND"].Connect("clicked", func() { this.handle_bit(OP_AND) })
+	btn["OR"].Connect("clicked", func() { this.handle_bit(OP_OR) })
+	btn["XOR"].Connect("clicked", func() { this.handle_bit(OP_XOR) })
+	btn["NOT"].Connect("clicked", func() { this.handle_bit(OP_NOT) })
+	btn["LSHFT"].Connect("clicked", func() { this.handle_shft(OP_LSHFT) })
+	btn["RSHFT"].Connect("clicked", func() { this.handle_shft(OP_RSHFT) })
 
 }
 
+// Switch the radix format.
+//  	Supports only 3.
+//  	16(hex), 10(dec), 8(oct)
+func (this *UI) switch_format(_rdx int) {
+	switch _rdx {
+	case 8:
+		fmt.Println("Radix : ", 8)
+		break
+	case 10:
+		fmt.Println("Radix : ", 10)
+		break
+	case 16:
+		fmt.Println("Radix : ", 16)
+		break
+	default:
+		break
+	}
+}
+
+// Handler for Number Buttons
+//  	0(0x0) ~ 15(0xF)
+func (this *UI) handle_num(_val int) {
+	fmt.Println("Handle : Num : ", _val)
+}
+
+// Handler for Arithmetic operation
+//  	ADD, SUB, MUL, DIV, MOD
+func (this *UI) handle_arith(_code int) {
+	switch _code {
+	case OP_ADD:
+		fmt.Println("Handle : ADD")
+	case OP_SUB:
+		fmt.Println("Handle : SUB")
+	case OP_MUL:
+		fmt.Println("Handle : MUL")
+	case OP_DIV:
+		fmt.Println("Handle : DIV")
+	case OP_MOD:
+		fmt.Println("Handle : MOD")
+	default:
+		return
+	}
+}
+
+// Handler for Bitwise operation
+//  	AND, OR, XOR, NOT
+func (this *UI) handle_bit(_code int) {
+	switch _code {
+	case OP_AND:
+		fmt.Println("Handle : AND")
+	case OP_OR:
+		fmt.Println("Handle : OR")
+	case OP_XOR:
+		fmt.Println("Handle : XOR")
+	case OP_NOT:
+		fmt.Println("Handle : NOT")
+	default:
+		return
+	}
+}
+
+// Handler for Shift operation
+//  	Left Shift, Right Shift
+func (this *UI) handle_shft(_code int) {
+	switch _code {
+	case OP_LSHFT:
+		fmt.Println("Handle : L-shift")
+	case OP_RSHFT:
+		fmt.Println("Handle : R-shift")
+	default:
+		return
+	}
+}
+
+// Change the Label of previous result
+func (this *UI) set_prev(_result string) {
+	if _result != nil {
+		this.Lbl_prev.SetLabel(_result)
+	}
+}
+
+// Change the Label of latest result
+func (this *UI) set_late(_result string) {
+	if _result != nil {
+		this.Lbl_late.SetLabel(_result)
+	}
+}
+
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+// Type : Operand and Operator
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
+// Operand Redefinition
+type Operand int64
+type Opnd Operand
+
+// Operation Codes
+const (
+	OP_ADD = iota
+	OP_SUB
+	OP_MUL
+	OP_DIV
+	OP_MOD
+	OP_AND
+	OP_OR
+	OP_XOR
+	OP_NOT
+	OP_LSHFT
+	OP_RSHFT
+)
+
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+// Utilities
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
+// Default Panic Handelr
+func catch() {
+	s := recover()
+	if s != nil {
+		// print the content
+		fmt.Println(s)
+	}
+}
+
+// wrapper of gtk.NewButton() with label
+func button(_lbl string) *gtk.Button {
+	return gtk.NewButtonWithLabel(_lbl)
+}
+
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+// GUI exports
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
+func Start() {
+	defer catch() // Panic Handler
+
+	// Initiate GTK
+	gtk.Init(&os.Args)
+
+	// Window Setup
+	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+	main_ui := new(UI)
+
+	main_ui.Construct()
+	defer main_ui.Destruct()
+
+	fmt.Println("UI Objects construction finished.")
+
+	// Event Code Here?
+
+	fmt.Println("Starting the UI...")
+
+	// Start the UI
+	gtk.Main()
+}
+
 // Ready for event streaming
+/*
 func Setup_Events(_Window *gtk.Window) chan interface{} {
 	defer catch()
 
@@ -244,83 +582,9 @@ func Setup_Events(_Window *gtk.Window) chan interface{} {
 
 	return ev_chan
 }
+*/
 
-func Setup_UI(_Window *gtk.Window) {
-	if _Window == nil {
-		panic("init_UI() : nil received ")
-	}
-
-	box_win := gtk.NewVBox(Homogeneous, Default_Spacing)
-
-	// Menu Bar
-	//  	File :
-	//  	View :
-	//  	Help :
-	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-	//mb_Menu := gtk.NewMenuBar()
-
-	// Frame - Calculation
-	// This frame contains radix(16,10,8) and result labels
-	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-	fm_calc := gtk.NewFrame("Calculation")
-	init_Calc(fm_calc)
-
-	// Frame - Numbers
-	// This frame contains number buttons for calculation
-	//  	Hexadecimal	: 0 ~ 9, A ~ F
-	//  	Decimal   	: 0 ~ 9
-	//  	Octal     	: 0 ~ 7
-	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-	fm_nums := gtk.NewFrame("Numbers")
-	init_Nums(fm_nums)
-
-	// Frame - Operations
-	// This frame contains operations.
-	//  	ADD, SUB, MUL, DIV, MOD
-	//  	AND, OR, XOR, NOT
-	//  	LSHFT, RSHFT
-	// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-	fm_oper := gtk.NewFrame("Operations")
-	init_Oper(fm_oper)
-
-	// Frame Positionings
-	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-	vpan1 := gtk.NewVPaned()
-	vpan1.Pack1(fm_calc, No_Resize, No_Shrink)
-
-	hpan1 := gtk.NewHPaned()
-	hpan1.Pack1(fm_nums, No_Resize, No_Shrink)
-	hpan1.Pack2(fm_oper, No_Resize, No_Shrink)
-
-	vpan1.Pack2(hpan1, No_Resize, No_Shrink)
-
-	box_win.Add(vpan1)
-
-	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-	_Window.Add(box_win)
-}
-
-// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
-// GUI exports
-// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-func Start() {
-	defer catch() // Panic Handler
-
-	// Initiate GTK
-	gtk.Init(&os.Args)
-
-	// Window Setup
-	// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-	// Create the Main Window
-	// Set title & size
-	win := gtk.NewWindow(gtk.WINDOW_TOPLEVEL)
-	win.SetTitle("0x_Calc")
-
-	// on Exit -> Quit the program
-	win.Connect("destroy", gtk.MainQuit)
-
+/*
 	// Initialte evnets
 	event := Setup_Events(win)
 
@@ -334,13 +598,4 @@ func Start() {
 			}
 		}
 	}()
-
-	// Initialize UI
-	Setup_UI(win)
-
-	win.SetSizeRequest(UI_Width, UI_Height)
-	win.ShowAll()
-
-	// Start the UI
-	gtk.Main()
-}
+*/

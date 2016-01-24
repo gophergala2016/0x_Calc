@@ -1,0 +1,114 @@
+// comm
+package main
+
+import (
+	"fmt"
+	"net"
+	"net/rpc"
+	"time"
+)
+
+func main() {
+
+	go Client()
+
+	fmt.Scanln()
+
+}
+
+// Shared type
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+type Calc int64
+
+type Args struct {
+	Lhs, Rhs int64
+}
+
+type Reply struct {
+	Res int64
+}
+
+func (c *Calc) ADD(args Args, reply *Reply) error {
+	reply.Res = args.Lhs + args.Rhs
+	return nil
+}
+func (c *Calc) SUB(args Args, reply *Reply) error {
+	reply.Res = args.Lhs - args.Rhs
+	return nil
+}
+func (c *Calc) MUL(args Args, reply *Reply) error {
+	reply.Res = args.Lhs * args.Rhs
+	return nil
+}
+func (c *Calc) DIV(args Args, reply *Reply) error {
+	reply.Res = args.Lhs / args.Rhs
+	return nil
+}
+
+func catch() { // Panic handler
+	s := recover()
+	if s != nil {
+		fmt.Println(s)
+	}
+}
+
+// Server side
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+func Server() {
+	defer catch()
+
+	rpc.Register(new(Calc))
+	lsner, err := net.Listen("tcp", ":65097")
+
+	if err != nil {
+		// Listener allocation Failed
+		fmt.Println(err)
+		panic("Server Listener failed")
+	} else {
+		// Listener allocation Success
+		// Reserve closing
+		defer lsner.Close()
+	}
+
+	for {
+		conn, err := lsner.Accept()
+		if err != nil {
+			// Client connection Failed
+			// Do Nothing
+			continue
+		} else {
+			// Client connection Success
+			// Reserve closing
+			defer conn.Close()
+		}
+
+		go rpc.ServeConn(conn)
+	}
+}
+
+// Client side
+// ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ==== ====
+func Client() {
+	defer catch()
+
+	cli, err := rpc.Dial("tcp", "localhost:65097")
+	if err != nil {
+		// Dial Failed -> panic
+		panic("RPC Dial failed")
+	} else {
+		// Dial Success -> Reserve closing
+		cli.Close()
+	}
+
+	operand := &Args{10, 2}
+	result := new(Reply)
+
+	// Request calculation
+	err = cli.Call("Calc.SUB", operand, result)
+	if err != nil {
+		fmt.Println("RPC Call Failed")
+	} else {
+		fmt.Println(result)
+	}
+
+}
